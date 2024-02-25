@@ -375,7 +375,7 @@ def sync_extract(text: str) -> ProgrammingLanguage:
     mode=instructor.Mode.JSON,
     )
     resp = client.chat.completions.create(
-        model="codellama",
+        model="gemma:7b",
         max_retries=2,
         messages=[
             {"role": "user", "content": text},
