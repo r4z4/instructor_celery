@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, session, flash, redirect, \
     url_for, jsonify
 from celery import Celery
+import time
 import psycopg2 
 
 app = Flask(__name__) 
@@ -248,6 +249,31 @@ def long_task(self):
     return {'current': 100, 'total': 100, 'status': 'Task completed!',
             'result': 42}
 
+@celery.task(bind=True)
+def ollama_task(self):
+    """Background task that runs a long OLLAMA function with progress reports."""
+    dataset = [
+        "Tell me about the Elixir programming language, some similar languages and some of its features and give me an example function so that I can see the language syntax.",
+        "Tell me about the Ruby programming language, some similar languages and some of its features and give me an example function so that I can see the language syntax.",
+        "Tell me about the Haskell programming language, some similar languages and some of its features and give me an example function so that I can see the language syntax.",
+        "Tell me about the Scala programming language, some similar languages and some of its features and give me an example function so that I can see the language syntax.",
+        "Tell me about the Julia programming language, some similar languages and some of its features and give me an example function so that I can see the language syntax.",
+        "Tell me about the Frank programming language, some similar languages and some of its features and give me an example function so that I can see the language syntax.",
+        "Tell me about the Zig programming language, some similar languages and some of its features and give me an example function so that I can see the language syntax.",
+    ]
+    all_langs: List[ProgrammingLanguage] = []
+    
+    for text in dataset:
+        lang = sync_extract(text)
+        all_langs.append(lang)
+        message = f"Least Lang extracted was {lang}"
+        self.update_state(state='PROGRESS',
+                    meta={'current': len(all_langs), 'total':  len(dataset),
+                        'status': message})
+        
+    return {'current': 100, 'total': 100, 'status': 'Task completed!',
+            'result': 42}
+
 @app.route('/celery-mail', methods=['GET', 'POST'])
 def celery_mail():
     if request.method == 'GET':
@@ -275,12 +301,23 @@ def celery_mail():
 @app.route('/longtask', methods=['POST'])
 def longtask():
     task = long_task.apply_async()
-    return jsonify({}), 202, {'Location': url_for('taskstatus',
+    return jsonify({}), 202, {'Location': url_for('taskstatus', task_type='longtask',
                                                   task_id=task.id)}
 
-@app.route('/status/<task_id>')
-def taskstatus(task_id):
-    task = long_task.AsyncResult(task_id)
+@app.route('/ollamatask', methods=['POST'])
+def ollamatask():
+    task = ollama_task.apply_async()
+    return jsonify({}), 202, {'Location': url_for('taskstatus', task_type='ollama',
+                                                  task_id=task.id)}
+
+@app.route('/status/<task_id>?<task_type>')
+def taskstatus(task_type, task_id):
+
+    if task_type == 'longtask':
+        task = long_task.AsyncResult(task_id)
+    elif task_type == 'ollama':
+        task = ollama_task.AsyncResult(task_id)
+
     if task.state == 'PENDING':
         # job did not start yet
         response = {
@@ -329,6 +366,23 @@ async def extract_language(text: str) -> ProgrammingLanguage:
         ],
         response_model=ProgrammingLanguage,
     )
+
+def sync_extract(text: str) -> ProgrammingLanguage:
+    client = instructor.patch(OpenAI(
+        base_url="http://localhost:11434/v1",
+        api_key="ollama",  # required, but unused
+    ),
+    mode=instructor.Mode.JSON,
+    )
+    resp = client.chat.completions.create(
+        model="codellama",
+        max_retries=2,
+        messages=[
+            {"role": "user", "content": text},
+        ],
+        response_model=ProgrammingLanguage,
+    )
+    return resp
   
   
 if __name__ == '__main__': 
